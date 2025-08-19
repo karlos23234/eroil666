@@ -1,6 +1,7 @@
 import telebot
 import requests
 import json
+import os
 from flask import Flask, request
 
 # ===== Telegram Bot =====
