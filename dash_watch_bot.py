@@ -6,7 +6,7 @@ from flask import Flask, request
 
 # ===== Telegram Bot =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Օրինակ՝ https://your-service.onrender.com/<BOT_TOKEN>
+WEBHOOK_URL = os.getenv("https://https://eroil666-2.onrender.com/8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14")  # Օրինակ՝ https://your-service.onrender.com/<BOT_TOKEN>
 
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise ValueError("Պետք է սահմանել BOT_TOKEN և WEBHOOK_URL որպես Environment Variables")
