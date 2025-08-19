@@ -1,0 +1,7 @@
+dash_watch_bot/
+│
+├─ dash_watch_bot.py       # Telegram + Dash bot կոդը
+├─ requirements.txt        # Python dependencies
+├─ users.json              # Խմբագրման համար (ավտոմատ ստեղծվում է)
+├─ sent_txs.json           # Ավելի վաղ ուղարկված TX-ների համար
+└─ README.md
