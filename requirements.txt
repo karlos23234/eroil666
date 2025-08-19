@@ -1,3 +1,4 @@
-flask
-pyTelegramBotAPI
-requests
+pyTelegramBotAPI==4.12.0
+Flask==2.3.6
+requests==2.32.1
+gunicorn==22.1.0
