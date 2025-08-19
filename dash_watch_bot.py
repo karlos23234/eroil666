@@ -116,7 +116,7 @@ def list_addresses(message):
     user_id = str(message.chat.id)
     if user_id in users and users[user_id]:
         addresses = "\n".join(f"• <code>{addr}</code>" for addr in users[user_id])
-        bot.reply_to(message, f"📋 Քո հասցեները:\n{addresses}")
+        bot.reply_to(message, f"📋 Քո հասցեերը:\n{addresses}")
     else:
         bot.reply_to(message, "❌ Չկան գրանցված հասցեներ")
 
@@ -184,7 +184,6 @@ def monitor():
                             except Exception as e:
                                 log_error(f"Send error: {e}")
                         sent_txs.setdefault(user_id, {}).setdefault(address, []).append(txid)
-                        # Պահպանել միայն վերջին 50 TX-երը
                         sent_txs[user_id][address] = sent_txs[user_id][address][-50:]
             save_json(SENT_TX_FILE, sent_txs)
             time.sleep(15)
@@ -212,3 +211,4 @@ if __name__ == "__main__":
     time.sleep(1)
     bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
     app.run(host="0.0.0.0", port=5000)
+
