@@ -1,4 +1,2 @@
-pyTelegramBotAPI>=4.12.0
-Flask>=2.3.0,<3.0
-requests>=2.32.0
-gunicorn>=22.0.0,<23.0
+pyTelegramBotAPI==4.13.0
+requests==2.31.0
