@@ -8,8 +8,9 @@ from flask import Flask, request
 from datetime import datetime
 
 # ===== Environment Variables =====
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
+WEBHOOK_URL = "https://eroil666-2.onrender.com/8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
+
 
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise ValueError("Set BOT_TOKEN and WEBHOOK_URL in Render environment variables")
