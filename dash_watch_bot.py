@@ -7,8 +7,6 @@ import threading
 from flask import Flask, request
 import telebot
 import re
-from aiohttp import ClientSession
-import asyncio
 
 # ===== Environment variables =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -46,48 +44,36 @@ sent_txs = load_json(SENT_TX_FILE)
 
 # ===== Address Validation =====
 def is_valid_dash_address(address):
-    """Validate Dash address format"""
     return re.match(r'^X[a-zA-Z0-9]{33}$', address) is not None
 
 # ===== Price API =====
-async def get_dash_price_usd():
+def get_dash_price_usd():
     try:
-        async with ClientSession() as session:
-            async with session.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10) as resp:
-                data = await resp.json()
-                return float(data.get("dash", {}).get("usd", 0))
+        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
+        return float(r.json().get("dash", {}).get("usd", 0))
     except Exception as e:
         log_message(f"Price API error: {e}")
         return None
 
-# ===== Transaction APIs =====
-async def get_latest_txs(address):
-    """Get transactions from Blockchair API"""
+# ===== Transaction API =====
+def get_latest_txs(address):
     try:
-        async with ClientSession() as session:
-            url = f"https://api.blockchair.com/dash/dash/transactions?q=recipient({address})&limit=10"
-            async with session.get(url, timeout=20) as resp:
-                data = await resp.json()
-                return data.get("data", [])
+        url = f"https://api.blockchair.com/dash/transactions?q=recipient({address})&limit=10"
+        r = requests.get(url, timeout=20)
+        data = r.json()
+        return data.get("data", [])
     except Exception as e:
         log_message(f"TX API error for {address}: {e}")
         return []
 
 # ===== Alert Formatter =====
 def format_alert(tx, address, tx_number, price):
-    txid = tx["hash"]
-    total_received = tx["output_total"] / 1e8  # Convert from satoshis
-    
+    txid = tx["transaction_hash"]
+    total_received = tx.get("output_total", 0) / 1e8
     if total_received <= 0:
         return None
-
     usd_text = f" (${total_received*price:.2f})" if price else ""
-    timestamp = tx.get("time")
-    if timestamp:
-        timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        timestamp = "Pending"
-
+    timestamp = tx.get("time") or tx.get("block_time") or "Pending"
     return (
         f"🔔 <b>Նոր փոխանցում #{tx_number}!</b>\n\n"
         f"📌 Address: <code>{address}</code>\n"
@@ -96,7 +82,7 @@ def format_alert(tx, address, tx_number, price):
         f"🔗 <a href='https://blockchair.com/dash/transaction/{txid}'>Դիտել Blockchair-ում</a>"
     )
 
-# ===== Telegram Handlers =====
+# ===== Telegram Commands =====
 @bot.message_handler(commands=['start', 'help'])
 def start(msg):
     bot.reply_to(msg, "Բարև 👋 Գրիր քո Dash հասցեն (սկսվում է X-ով)։\n\n"
@@ -106,8 +92,8 @@ def start(msg):
                      "/price - Տեսնել Dash-ի գինը")
 
 @bot.message_handler(commands=['price'])
-async def send_price(msg):
-    price = await get_dash_price_usd()
+def send_price(msg):
+    price = get_dash_price_usd()
     if price:
         bot.reply_to(msg, f"💰 Dash-ի ընթացիկ գինը: ${price:.2f}")
     else:
@@ -125,20 +111,17 @@ def list_addresses(msg):
 @bot.message_handler(commands=['delete'])
 def delete_address(msg):
     user_id = str(msg.chat.id)
-    address = msg.text.split()[1] if len(msg.text.split()) > 1 else None
-    
+    parts = msg.text.split()
+    address = parts[1] if len(parts) > 1 else None
     if not address:
         bot.reply_to(msg, "❌ Օգտագործում: /delete X...")
         return
-    
     if user_id in users and address in users[user_id]:
         users[user_id].remove(address)
         save_json(USERS_FILE, users)
-        
         if user_id in sent_txs and address in sent_txs[user_id]:
             del sent_txs[user_id][address]
             save_json(SENT_TX_FILE, sent_txs)
-        
         bot.reply_to(msg, f"✅ Հասցեն <code>{address}</code> ջնջված է")
     else:
         bot.reply_to(msg, f"❌ Հասցեն <code>{address}</code> չի գտնվել")
@@ -147,62 +130,49 @@ def delete_address(msg):
 def save_address(msg):
     user_id = str(msg.chat.id)
     address = msg.text.strip()
-    
     if not is_valid_dash_address(address):
-        bot.reply_to(msg, "❌ Անվավեր Dash հասցե: Պետք է սկսվի X-ով և պարունակի 34 նիշ")
+        bot.reply_to(msg, "❌ Անվավեր Dash հասցե")
         return
-    
-    if user_id in users and len(users[user_id]) >= 5:  # Limit to 5 addresses per user
+    if user_id in users and len(users[user_id]) >= 5:
         bot.reply_to(msg, "❌ Դուք կարող եք հետևել առավելագույնը 5 հասցեի")
         return
-    
     users.setdefault(user_id, [])
     if address not in users[user_id]:
         users[user_id].append(address)
     save_json(USERS_FILE, users)
-
     sent_txs.setdefault(user_id, {})
     sent_txs[user_id].setdefault(address, [])
     save_json(SENT_TX_FILE, sent_txs)
-
     bot.reply_to(msg, f"✅ Հասցեն <code>{address}</code> պահպանվեց։")
 
-# ===== Background Monitoring =====
-async def monitor_loop():
+# ===== Background Monitor =====
+def monitor_loop():
     while True:
         try:
-            price = await get_dash_price_usd()
-            
+            price = get_dash_price_usd()
             for user_id, addresses in users.items():
                 for address in addresses:
-                    txs = await get_latest_txs(address)
-                    known_txs = [t["txid"] for t in sent_txs.get(user_id, {}).get(address, [])]
+                    txs = get_latest_txs(address)
+                    known = [t["txid"] for t in sent_txs.get(user_id, {}).get(address, [])]
                     last_number = max([t.get("num",0) for t in sent_txs.get(user_id, {}).get(address, [])], default=0)
-
                     for tx in reversed(txs):
-                        txid = tx["hash"]
-                        if txid in known_txs:
+                        txid = tx["transaction_hash"]
+                        if txid in known:
                             continue
-                        
                         last_number += 1
                         alert = format_alert(tx, address, last_number, price)
-                        if not alert:
-                            continue
-                        
-                        try:
-                            await bot.send_message(user_id, alert, disable_web_page_preview=True)
-                        except Exception as e:
-                            log_message(f"Send message error: {e}")
-
+                        if alert:
+                            try:
+                                bot.send_message(user_id, alert, disable_web_page_preview=True)
+                            except Exception as e:
+                                log_message(f"Send error: {e}")
                         sent_txs.setdefault(user_id, {}).setdefault(address, []).append({"txid": txid, "num": last_number})
-                        sent_txs[user_id][address] = sent_txs[user_id][address][-50:]  # Keep last 50 txs
-
+                        sent_txs[user_id][address] = sent_txs[user_id][address][-50:]
             save_json(SENT_TX_FILE, sent_txs)
-            await asyncio.sleep(10)  # Check every 10 seconds
-            
+            time.sleep(15)
         except Exception as e:
             log_message(f"Monitor error: {e}")
-            await asyncio.sleep(30)
+            time.sleep(30)
 
 # ===== Flask Server =====
 app = Flask(__name__)
@@ -218,11 +188,8 @@ def webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
-def run_bot():
+if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
-    asyncio.run(monitor_loop())
-
-if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
+    threading.Thread(target=monitor_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
