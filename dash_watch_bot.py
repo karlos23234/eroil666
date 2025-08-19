@@ -29,7 +29,6 @@ def save_json(file, data):
 users = load_json(USERS_FILE)
 sent_txs = load_json(SENT_TX_FILE)
 
-# ===== Dash functions =====
 def get_dash_price_usd():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
@@ -76,8 +75,8 @@ def save_address(msg):
     save_json(SENT_TX_FILE, sent_txs)
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
 
-# ===== Background monitor loop =====
-def monitor():
+# ===== Monitor loop every 5 sec =====
+def monitor_fast():
     while True:
         price = get_dash_price_usd()
         for user_id, addresses in users.items():
@@ -97,9 +96,9 @@ def monitor():
                     known.append({"txid": tx["hash"], "num": last_number})
                 sent_txs.setdefault(user_id, {})[address] = known
         save_json(SENT_TX_FILE, sent_txs)
-        time.sleep(5)  # 5 վայրկյանում մեկ անգամ ստուգում
+        time.sleep(5)
 
-threading.Thread(target=monitor, daemon=True).start()
+threading.Thread(target=monitor_fast, daemon=True).start()
 
 # ===== Flask server for Render =====
 app = Flask(__name__)
