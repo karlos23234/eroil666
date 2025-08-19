@@ -2,13 +2,14 @@ import telebot
 import requests
 import json
 import os
-import time
 import threading
+import time
 from flask import Flask, request
+from datetime import datetime
 
 # ===== Telegram Bot =====
 BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
-WEBHOOK_URL = "https://eroil666-2.onrender.com/8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
+WEBHOOK_URL = f"https://eroil666-2.onrender.com/{BOT_TOKEN}"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -27,10 +28,36 @@ def save_json(file, data):
 users = load_json(USERS_FILE)
 sent_txs = load_json(SENT_TX_FILE)
 
+# ===== Blockchair functions =====
+def get_address_txs(address):
+    try:
+        url = f"https://api.blockchair.com/dash/dashboards/address/{address}"
+        r = requests.get(url, timeout=20)
+        if r.status_code == 200:
+            data = r.json()
+            return data["data"][address]["transactions"]  # returns list of txids
+        return []
+    except:
+        return []
+
+def get_tx_details(txid):
+    try:
+        url = f"https://api.blockchair.com/dash/dashboards/transaction/{txid}"
+        r = requests.get(url, timeout=20)
+        if r.status_code == 200:
+            return r.json()["data"][txid]
+        return None
+    except:
+        return None
+
+def format_alert(address, amount_dash, txid, time, tx_number):
+    link = f"https://blockchair.com/dash/transaction/{txid}"
+    return f"🔔 Նոր փոխանցում #{tx_number}!\n\n📌 Address: {address}\n💰 Amount: {amount_dash:.8f} DASH\n🕒 Time: {time}\n🔗 {link}"
+
 # ===== Telegram Handlers =====
 @bot.message_handler(commands=['start'])
 def start(msg):
-    bot.reply_to(msg, "Բարև 👋 Գրի՛ր քո Dash հասցեն (սկսվում է X-ով)")
+    bot.reply_to(msg, "Բարև 👋 Գրիր քո Dash հասցեն (սկսվում է X-ով)")
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith("X"))
 def save_address(msg):
@@ -45,27 +72,34 @@ def save_address(msg):
     save_json(SENT_TX_FILE, sent_txs)
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
 
-# ===== Blockchain checker =====
-def check_transactions():
+# ===== Background checker =====
+def check_loop():
     while True:
-        try:
-            for user_id, addresses in users.items():
-                for address in addresses:
-                    url = f"https://api.blockcypher.com/v1/dash/main/addrs/{address}"
-                    r = requests.get(url, timeout=10)
-                    if r.status_code == 200:
-                        data = r.json()
-                        txs = data.get("txrefs", [])
-                        for tx in txs:
-                            tx_hash = tx["tx_hash"]
-                            if tx_hash not in sent_txs[user_id][address]:
-                                amount = tx["value"] / 1e8
-                                bot.send_message(user_id, f"💸 Նոր փոխանցում!\nHash: {tx_hash}\nԳումար: {amount} DASH")
-                                sent_txs[user_id][address].append(tx_hash)
+        for user_id, addresses in users.items():
+            for address in addresses:
+                txids = get_address_txs(address)
+                if not txids:
+                    continue
+                for txid in txids[:5]:  # վերջին 5 գործարքը
+                    if txid not in sent_txs.get(user_id, {}).get(address, []):
+                        details = get_tx_details(txid)
+                        if details:
+                            # գտնել ելքային կամ մուտքային outputs
+                            outputs = details["outputs"]
+                            total = sum(o["value"] for o in outputs if o["recipient"] == address)
+                            amount_dash = total / 1e8
+                            time_str = details["transaction"]["time"]
+                            tx_number = len(sent_txs[user_id][address]) + 1
+                            alert = format_alert(address, amount_dash, txid, time_str, tx_number)
+                            try:
+                                bot.send_message(user_id, alert)
+                                sent_txs[user_id][address].append(txid)
                                 save_json(SENT_TX_FILE, sent_txs)
-        except Exception as e:
-            print("Error in checker:", e)
-        time.sleep(10)  # ամեն 10 վայրկյանը մեկ ստուգում է
+                            except:
+                                pass
+        time.sleep(10)  # ստուգում ամեն 10 վայրկյան
+
+threading.Thread(target=check_loop, daemon=True).start()
 
 # ===== Flask route for webhook =====
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
@@ -80,6 +114,6 @@ bot.remove_webhook()
 bot.set_webhook(url=WEBHOOK_URL)
 
 if __name__ == "__main__":
-    threading.Thread(target=check_transactions, daemon=True).start()
     port = int(5000)
     app.run(host="0.0.0.0", port=port)
+
