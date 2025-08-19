@@ -4,12 +4,15 @@ import json
 import os
 import threading
 import time
-from flask import Flask, request
 from datetime import datetime
+from flask import Flask, request
 
 # ===== Telegram Bot =====
-BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
-WEBHOOK_URL = f"https://eroil666-2.onrender.com/{BOT_TOKEN}"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Սահմանիր Render Environment Variables
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Սահմանիր Render Environment Variables
+
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise ValueError("Set BOT_TOKEN and WEBHOOK_URL in Render environment variables")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -60,7 +63,7 @@ def format_alert(tx, address, tx_number):
 # ===== Telegram Handlers =====
 @bot.message_handler(commands=['start'])
 def start(msg):
-    bot.reply_to(msg, "Բարև 👋 Գրի՛ր քո Dash հասցեն (սկսվում է X-ով)")
+    bot.reply_to(msg, "Բարև 👋 Գրիր քո Dash հասցեն (սկսվում է X-ով)")
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith("X"))
 def save_address(msg):
@@ -88,27 +91,4 @@ def check_loop():
                         alert = format_alert(tx, address, i)
                         try:
                             bot.send_message(user_id, alert)
-                            sent_txs[user_id][address].append(tx["hash"])
-                            save_json(SENT_TX_FILE, sent_txs)
-                        except Exception as e:
-                            print("Telegram send error:", e)
-        time.sleep(10)
-
-threading.Thread(target=check_loop, daemon=True).start()
-
-# ===== Flask route for webhook =====
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "OK", 200
-
-# ===== Set webhook =====
-bot.remove_webhook()
-bot.set_webhook(url=WEBHOOK_URL)
-
-if __name__ == "__main__":
-    port = int(5000)
-    app.run(host="0.0.0.0", port=port)
-
+                            sent_txs[user_id][addres]()_]()_
