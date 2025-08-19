@@ -8,8 +8,8 @@ from flask import Flask, request
 from datetime import datetime
 
 # ===== Telegram Bot =====
-BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
-WEBHOOK_URL = f"https://eroil666-2.onrender.com/{BOT_TOKEN}"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Միջավայրի փոփոխականից
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Միջավայրի փոփոխականից
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -109,7 +109,7 @@ def check_loop():
                 txids = get_address_txs(address)
                 if not txids:
                     continue
-                for txid in txids[:5]:  # վերջին 5 գործարքը
+                for txid in txids[:5]:
                     if txid not in sent_txs.get(user_id, {}).get(address, []):
                         amount_dash = get_received_amount(address, txid)
                         if amount_dash > 0:
