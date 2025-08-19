@@ -1,116 +1,121 @@
 import os
-import time
+import json
 import requests
-import telebot
+import time
+from datetime import datetime, timezone
+import threading
 from flask import Flask, request
-from datetime import datetime
+import telebot
 
-# ======== CONFIG ========
-BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
-CHAT_ID = 123456789   # քո Telegram chat ID (օգտագործիր /start որ գրեմ chat_id)
-DASH_ADDRESS = "XekdVU8vhmkaSsEDf9FrGdgLvvJsphi4DE"  # քո Dash հասցեն
-WEBHOOK_HOST = "https://eroil666-4.onrender.com"
+# ===== Environment variables =====
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise ValueError("Դուք պետք է ավելացնեք BOT_TOKEN և WEBHOOK_URL որպես Environment Variable")
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
-app = Flask(__name__)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# պահում ենք վերջին հայտնի TX hash-ը
-last_seen_tx = None
+USERS_FILE = "users.json"
+SENT_TX_FILE = "sent_txs.json"
 
-# ======== HELPERS ========
-def get_latest_tx(address):
-    """Վերադարձնում է վերջին տրանզակցիայի տվյալները Blockchair-ից"""
+# ===== Helpers =====
+def load_json(file):
+    return json.load(open(file, "r", encoding="utf-8")) if os.path.exists(file) else {}
+
+def save_json(file, data):
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+users = load_json(USERS_FILE)
+sent_txs = load_json(SENT_TX_FILE)
+
+def get_dash_price_usd():
     try:
-        url = f"https://api.blockchair.com/dash/dashboards/address/{address}"
-        r = requests.get(url, timeout=10)
-        data = r.json()["data"][address]["transactions"]
-
-        if not data:
-            return None
-
-        latest_tx_hash = data[0]
-        tx_url = f"https://api.blockchair.com/dash/raw/transaction/{latest_tx_hash}"
-        tx_data = requests.get(tx_url, timeout=10).json()
-        tx_info = tx_data["data"][latest_tx_hash]["decoded_raw_transaction"]
-
-        # ժամանակը
-        blockchair_url = f"https://blockchair.com/dash/transaction/{latest_tx_hash}"
-        timestamp = datetime.utcfromtimestamp(
-            tx_data["data"][latest_tx_hash]["transaction"]["time"]
-        ).strftime("%Y-%m-%d %H:%M:%S")
-
-        # գումարը (միավորները Սատոշի են → /1e8)
-        total_out = sum([int(o["value"]) for o in tx_info["vout"]])
-        dash_amount = total_out / 1e8
-
-        return {
-            "hash": latest_tx_hash,
-            "address": address,
-            "amount": dash_amount,
-            "time": timestamp,
-            "url": blockchair_url
-        }
-    except Exception as e:
-        print("❌ Error:", e)
+        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
+        return float(r.json().get("dash", {}).get("usd", 0))
+    except:
         return None
 
-def format_tx_message(tx, index):
+def get_latest_txs(address):
+    try:
+        r = requests.get(f"https://api.blockcypher.com/v1/dash/main/addrs/{address}/full?limit=10", timeout=20)
+        return r.json().get("txs", [])
+    except:
+        return []
+
+def format_alert(tx, address, tx_number, price):
+    txid = tx["hash"]
+    total_received = sum([o["value"]/1e8 for o in tx.get("outputs", []) if address in (o.get("addresses") or [])])
+    usd_text = f" (${total_received*price:.2f})" if price else ""
+    timestamp = tx.get("confirmed")
+    timestamp = datetime.fromisoformat(timestamp.replace("Z","+00:00")).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown"
     return (
-        f"🔔 Նոր փոխանցում #{index}!\n\n"
-        f"📌 Address: {tx['address']}\n"
-        f"💰 Amount: {tx['amount']:.8f} DASH\n"
-        f"🕒 Time: {tx['time']}\n"
-        f"🔗 {tx['url']}"
+        f"🔔 Նոր փոխանցում #{tx_number}!\n\n"
+        f"📌 Address: {address}\n"
+        f"💰 Amount: {total_received:.8f} DASH{usd_text}\n"
+        f"🕒 Time: {timestamp}\n"
+        f"🔗 https://blockchair.com/dash/transaction/{txid}"
     )
 
-# ======== BACKGROUND CHECKER ========
-def tx_watcher():
-    global last_seen_tx
-    index = 1
+# ===== Telegram Handlers =====
+@bot.message_handler(commands=['start'])
+def start(msg):
+    bot.reply_to(msg, "Բարև 👋 Գրի՛ր քո Dash հասցեն (սկսվում է X-ով)")
+
+@bot.message_handler(func=lambda m: m.text and m.text.startswith("X"))
+def save_address(msg):
+    user_id = str(msg.chat.id)
+    address = msg.text.strip()
+    users.setdefault(user_id, [])
+    if address not in users[user_id]:
+        users[user_id].append(address)
+    save_json(USERS_FILE, users)
+    sent_txs.setdefault(user_id, {})
+    sent_txs[user_id].setdefault(address, [])
+    save_json(SENT_TX_FILE, sent_txs)
+    bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
+
+# ===== Background loop =====
+def monitor():
     while True:
-        tx = get_latest_tx(DASH_ADDRESS)
-        if tx and tx["hash"] != last_seen_tx:
-            last_seen_tx = tx["hash"]
-            msg = format_tx_message(tx, index)
-            bot.send_message(CHAT_ID, msg)
-            index += 1
-        time.sleep(10)  # ստուգում ամեն 10 վայրկյան
+        price = get_dash_price_usd()
+        for user_id, addresses in users.items():
+            for address in addresses:
+                txs = get_latest_txs(address)
+                known = [t["txid"] for t in sent_txs.get(user_id, {}).get(address, [])]
+                last_number = max([t.get("num",0) for t in sent_txs.get(user_id, {}).get(address, [])], default=0)
+                for tx in reversed(txs):
+                    txid = tx["hash"]
+                    if txid in known:
+                        continue
+                    last_number += 1
+                    alert = format_alert(tx, address, last_number, price)
+                    try:
+                        bot.send_message(user_id, alert)
+                    except Exception as e:
+                        print("Telegram send error:", e)
+                    sent_txs.setdefault(user_id, {}).setdefault(address, []).append({"txid": txid, "num": last_number})
+        save_json(SENT_TX_FILE, sent_txs)
+        time.sleep(5)  # 5 վայրկյանից ստուգում նոր TX-ների համար
 
-# ======== TELEGRAM HANDLERS ========
-@bot.message_handler(commands=["start"])
-def start_cmd(message):
-    global CHAT_ID
-    CHAT_ID = message.chat.id
-    bot.send_message(
-        CHAT_ID,
-        "👋 Բարի գալուստ!\n"
-        "Ես քեզ կուղարկեմ վերջին նոր Dash փոխանցումները։"
-    )
+threading.Thread(target=monitor, daemon=True).start()
 
-# ======== FLASK WEBHOOK ========
-@app.route("/webhook", methods=["POST"])
+# ===== Flask server for Render =====
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    if request.headers.get("content-type") == "application/json":
-        json_str = request.get_data().decode("utf-8")
-        update = telebot.types.Update.de_json(json_str)
-        bot.process_new_updates([update])
-        return "OK", 200
-    else:
-        return "Unsupported Media Type", 415
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
 
-# ======== MAIN ========
+bot.remove_webhook()
+bot.set_webhook(url=WEBHOOK_URL)
+
 if __name__ == "__main__":
-    import threading
-
-    port = int(os.environ.get("PORT", 5000))
-
-    # Remove old webhook
-    bot.remove_webhook()
-    WEBHOOK_URL = f"{WEBHOOK_HOST}/webhook"
-    bot.set_webhook(url=WEBHOOK_URL)
-
-    # Start TX watcher in background
-    threading.Thread(target=tx_watcher, daemon=True).start()
-
-    print(f"🚀 Bot running with webhook at {WEBHOOK_URL}")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
