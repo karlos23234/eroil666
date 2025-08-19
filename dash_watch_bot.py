@@ -96,11 +96,8 @@ def monitor():
             known_txs = {row[0]: row[1] for row in cursor.fetchall()}
             last_number = max(known_txs.values(), default=0)
 
-            # Ուղարկել նոր TX-երը՝ ամենաշատը 5
-            new_txs_sent = 0
+            # Ուղարկել բոլոր նոր TX-երը առանց սահմանափակման
             for tx in reversed(txs):
-                if new_txs_sent >= 5:
-                    break
                 txid = tx["hash"]
                 if txid in known_txs:
                     continue
@@ -111,15 +108,13 @@ def monitor():
                     bot.send_message(user_id, alert)
                 except Exception as e:
                     print(f"[{datetime.now()}] Telegram send error: {e}")
-                # Նոր TX-ը ավելացնել DB-ում
                 cursor.execute(
                     "INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)",
                     (user_id, address, txid, last_number)
                 )
                 conn.commit()
-                new_txs_sent += 1
 
-        time.sleep(10)  # 10 վայրկյան
+        time.sleep(3)  # 3 վայրկյան՝ շուտ ստուգելու համար
 
 # ===== Flask server =====
 app = Flask(__name__)
