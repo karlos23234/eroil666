@@ -8,8 +8,8 @@ from flask import Flask, request
 from datetime import datetime
 
 # ===== Telegram Bot =====
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Միջավայրի փոփոխականից
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Միջավայրի փոփոխականից
+BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
+WEBHOOK_URL = f"https://eroil666-2.onrender.com/{BOT_TOKEN}"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
