@@ -5,12 +5,14 @@ import os
 import time
 from datetime import datetime, timezone
 import threading
+from flask import Flask
 
 # ===== Telegram Bot =====
 BOT_TOKEN = os.getenv("8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14")
 if not BOT_TOKEN:
-    raise ValueError("8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14")
+    raise ValueError("Դուք պետք է ավելացնեք BOT_TOKEN որպես Environment Variable")
 bot = telebot.TeleBot(BOT_TOKEN)
+
 
 USERS_FILE = "users.json"
 SENT_TX_FILE = "sent_txs.json"
