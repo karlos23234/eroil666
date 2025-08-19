@@ -5,7 +5,6 @@ import os
 import time
 from datetime import datetime, timezone
 import threading
-from flask import Flask
 
 # ===== Telegram Bot =====
 BOT_TOKEN = os.getenv("8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14")
@@ -103,16 +102,6 @@ def monitor():
                 save_sent_txs(sent_txs)
         time.sleep(30)
 
-# ===== Flask server =====
-app = Flask(__name__)
-@app.route("/")
-def home():
-    return "Bot is running!"
-
-def run_flask():
-    app.run(host="0.0.0.0", port=3000)
-
 # ===== Start threads =====
 threading.Thread(target=monitor, daemon=True).start()
-threading.Thread(target=run_flask, daemon=True).start()
 bot.infinity_polling()
