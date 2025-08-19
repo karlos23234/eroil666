@@ -11,6 +11,7 @@ import re
 # ===== Environment variables =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise ValueError("Պետք է ավելացնես BOT_TOKEN և WEBHOOK_URL Env Variable-ներով")
 
@@ -22,7 +23,7 @@ LOG_FILE = "bot.log"
 
 # ===== Helpers =====
 def log_message(message):
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()}: {message}\n")
 
 def load_json(file):
@@ -50,6 +51,9 @@ def is_valid_dash_address(address):
 def get_dash_price_usd():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
+        if r.status_code != 200:
+            log_message(f"Price API returned {r.status_code}")
+            return None
         return float(r.json().get("dash", {}).get("usd", 0))
     except Exception as e:
         log_message(f"Price API error: {e}")
@@ -60,6 +64,9 @@ def get_latest_txs(address):
     try:
         url = f"https://api.blockchair.com/dash/transactions?q=recipient({address})&limit=10"
         r = requests.get(url, timeout=20)
+        if r.status_code != 200:
+            log_message(f"Blockchair API error {r.status_code} for {address}")
+            return []
         data = r.json()
         return data.get("data", [])
     except Exception as e:
@@ -68,11 +75,13 @@ def get_latest_txs(address):
 
 # ===== Alert Formatter =====
 def format_alert(tx, address, tx_number, price):
-    txid = tx["transaction_hash"]
+    txid = tx.get("transaction_hash")
+    if not txid:
+        return None
     total_received = tx.get("output_total", 0) / 1e8
     if total_received <= 0:
         return None
-    usd_text = f" (${total_received*price:.2f})" if price else ""
+    usd_text = f" (${total_received*price:.2f})" if price and price > 0 else ""
     timestamp = tx.get("time") or tx.get("block_time") or "Pending"
     return (
         f"🔔 <b>Նոր փոխանցում #{tx_number}!</b>\n\n"
@@ -156,8 +165,8 @@ def monitor_loop():
                     known = [t["txid"] for t in sent_txs.get(user_id, {}).get(address, [])]
                     last_number = max([t.get("num",0) for t in sent_txs.get(user_id, {}).get(address, [])], default=0)
                     for tx in reversed(txs):
-                        txid = tx["transaction_hash"]
-                        if txid in known:
+                        txid = tx.get("transaction_hash")
+                        if not txid or txid in known:
                             continue
                         last_number += 1
                         alert = format_alert(tx, address, last_number, price)
@@ -188,8 +197,14 @@ def webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
+# ===== Start Bot =====
+def start_monitor():
+    threading.Thread(target=monitor_loop, daemon=True).start()
+
 if __name__ == "__main__":
+    start_monitor()
     bot.remove_webhook()
     bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-    threading.Thread(target=monitor_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=5000)
+    # Render/production server will handle app.run via WSGI
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
