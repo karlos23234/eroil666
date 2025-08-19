@@ -24,22 +24,16 @@ CREATE TABLE IF NOT EXISTS users (
     PRIMARY KEY(user_id, address)
 )
 """)
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS sent_txs (
+    txid TEXT PRIMARY KEY,
     user_id TEXT,
     address TEXT,
-    txid TEXT PRIMARY KEY,
     num INTEGER
 )
 """)
 conn.commit()
-
-def get_dash_price_usd():
-    try:
-        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
-        return float(r.json().get("dash", {}).get("usd", 0))
-    except:
-        return None
 
 def get_latest_txs(address):
     try:
@@ -48,13 +42,12 @@ def get_latest_txs(address):
     except:
         return []
 
-def format_alert(tx, address, tx_number, price):
+def format_alert(tx, address):
     txid = tx["hash"]
     total_received = sum([o.get("value",0)/1e8 for o in tx.get("outputs", []) if address in (o.get("addresses") or [])])
-    usd_text = f" (${total_received*price:.2f})" if price else ""
     timestamp = tx.get("confirmed")
     timestamp = datetime.fromisoformat(timestamp.replace("Z","+00:00")).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown"
-    return f"🔔 Նոր փոխանցում #{tx_number}!\n📌 Address: {address}\n💰 Amount: {total_received:.8f} DASH{usd_text}\n🕒 Time: {timestamp}\n🔗 https://blockchair.com/dash/transaction/{txid}"
+    return f"🔔 Նոր փոխանցում!\n📌 Address: {address}\n💰 Amount: {total_received:.8f} DASH\n🕒 Time: {timestamp}\n🔗 https://blockchair.com/dash/transaction/{txid}"
 
 @bot.message_handler(commands=['start'])
 def start(msg):
@@ -70,27 +63,32 @@ def save_address(msg):
 
 def monitor():
     while True:
-        price = get_dash_price_usd()
         cursor.execute("SELECT user_id, address FROM users")
         all_users = cursor.fetchall()
         for user_id, address in all_users:
             txs = get_latest_txs(address)
-            cursor.execute("SELECT txid, num FROM sent_txs WHERE user_id=? AND address=?", (user_id, address))
-            known_txs = {row[0]: row[1] for row in cursor.fetchall()}
-            last_number = max(known_txs.values(), default=0)
+            cursor.execute("SELECT txid FROM sent_txs WHERE user_id=? AND address=?", (user_id, address))
+            sent = {row[0] for row in cursor.fetchall()}
+
+            new_txs = []
             for tx in reversed(txs):
                 txid = tx["hash"]
-                if txid in known_txs:
-                    continue
-                last_number += 1
-                alert = format_alert(tx, address, last_number, price)
+                if txid not in sent:
+                    new_txs.append(tx)
+            
+            # Ուղարկել միայն վերջին 10 նոր TX-երը
+            for tx in new_txs[-10:]:
+                alert = format_alert(tx, address)
                 try:
                     bot.send_message(user_id, alert)
                 except:
                     pass
-                cursor.execute("INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)", (user_id, address, txid, last_number))
-                conn.commit()
-        time.sleep(3)  # 3 վայրկյան ինտերվալ, շատ թեթև
+                cursor.execute("INSERT OR IGNORE INTO sent_txs (txid, user_id, address, num) VALUES (?, ?, ?, ?)",
+                               (tx["hash"], user_id, address, 0))
+            # Մնացածները ջնջել՝ միայն 10 վերջինը պահելու համար
+            cursor.execute("DELETE FROM sent_txs WHERE user_id=? AND address=? AND txid NOT IN (SELECT txid FROM sent_txs WHERE user_id=? AND address=? ORDER BY rowid DESC LIMIT 10)", (user_id, address, user_id, address))
+            conn.commit()
+        time.sleep(3)
 
 app = Flask(__name__)
 
@@ -110,4 +108,3 @@ if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=5000)
-
