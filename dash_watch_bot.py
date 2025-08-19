@@ -134,7 +134,7 @@ def remove_address(message):
         if user_id in sent_txs and address in sent_txs[user_id]:
             del sent_txs[user_id][address]
             save_json(SENT_TX_FILE, sent_txs)
-        bot.reply_to(message, f"✅ Հասցեն ջնջված է")
+        bot.reply_to(message, "✅ Հասցեն ջնջված է")
     else:
         bot.reply_to(message, "❌ Հասցեն չի գտնվել")
 
@@ -212,3 +212,4 @@ if __name__=="__main__":
     time.sleep(1)
     bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
     app.run(host="0.0.0.0",port=5000)
+
