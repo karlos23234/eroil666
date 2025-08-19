@@ -2,11 +2,12 @@ import telebot
 import requests
 import json
 import os
+import threading
 import time
 from datetime import datetime
 
 # ===== Telegram Bot =====
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Տես, որ BOT_TOKEN պետք է լինի Render Environment Variables
+BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ===== Helpers =====
@@ -36,29 +37,18 @@ def get_address_txs(address, limit=5):
         print("Error fetching TXs:", e)
         return []
 
-def dash_to_usd(amount_dash):
-    try:
-        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
-        if r.status_code == 200:
-            return amount_dash * r.json()["dash"]["usd"]
-    except:
-        return None
-    return None
-
 def format_alert(tx, address, tx_number):
     txid = tx["hash"]
     total_received = sum([o["value"] for o in tx.get("outputs", []) if address in o.get("addresses", [])]) / 1e8
-    amount_usd = dash_to_usd(total_received)
     timestamp = tx.get("confirmed", None)
     if timestamp:
         timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
     else:
         timestamp = "Unknown"
-    usd_text = f" (${amount_usd:.2f})" if amount_usd else ""
     return (
         f"🔔 Նոր փոխանցում #{tx_number}!\n\n"
         f"📌 Address: {address}\n"
-        f"💰 Amount: {total_received:.8f} DASH{usd_text}\n"
+        f"💰 Amount: {total_received:.8f} DASH\n"
         f"🕒 Time: {timestamp}\n"
         f"🔗 https://live.blockcypher.com/dash/tx/{txid}/"
     )
@@ -66,7 +56,7 @@ def format_alert(tx, address, tx_number):
 # ===== Telegram Handlers =====
 @bot.message_handler(commands=['start'])
 def start(msg):
-    bot.reply_to(msg, "Բարև 👋 Գրիր քո Dash հասցեն (սկսվում է X-ով)")
+    bot.reply_to(msg, "Բարև 👋 Գրի՛ր քո Dash հասցեն (սկսվում է X-ով)")
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith("X"))
 def save_address(msg):
@@ -81,7 +71,7 @@ def save_address(msg):
     save_json(SENT_TX_FILE, sent_txs)
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
 
-# ===== Background loop =====
+# ===== Background checker =====
 def check_loop():
     while True:
         for user_id, addresses in users.items():
@@ -100,7 +90,10 @@ def check_loop():
                             print("Telegram send error:", e)
         time.sleep(10)
 
-# ===== Run bot =====
-import threading
+# ===== Start background thread =====
 threading.Thread(target=check_loop, daemon=True).start()
-bot.infinity_polling()
+
+# ===== Start bot polling =====
+bot.remove_webhook()  # Վստահ եղիր, որ webhook չկա
+bot.polling(none_stop=True)
+
