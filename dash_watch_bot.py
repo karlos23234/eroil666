@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import time
+import sqlite3
 from datetime import datetime
 import threading
 from flask import Flask, request
@@ -15,20 +16,29 @@ if not BOT_TOKEN or not WEBHOOK_URL:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-USERS_FILE = "users.json"
-SENT_TX_FILE = "sent_txs.json"
+# ===== SQLite setup =====
+conn = sqlite3.connect("bot_data.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT,
+    address TEXT,
+    PRIMARY KEY(user_id, address)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS sent_txs (
+    user_id TEXT,
+    address TEXT,
+    txid TEXT PRIMARY KEY,
+    num INTEGER
+)
+""")
+conn.commit()
 
 # ===== Helpers =====
-def load_json(file):
-    return json.load(open(file, "r", encoding="utf-8")) if os.path.exists(file) else {}
-
-def save_json(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-users = load_json(USERS_FILE)
-sent_txs = load_json(SENT_TX_FILE)
-
 def get_dash_price_usd():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
@@ -66,37 +76,35 @@ def start(msg):
 def save_address(msg):
     user_id = str(msg.chat.id)
     address = msg.text.strip()
-    users.setdefault(user_id, [])
-    if address not in users[user_id]:
-        users[user_id].append(address)
-    save_json(USERS_FILE, users)
-    sent_txs.setdefault(user_id, {})
-    sent_txs[user_id].setdefault(address, [])
-    save_json(SENT_TX_FILE, sent_txs)
+    cursor.execute("INSERT OR IGNORE INTO users (user_id, address) VALUES (?, ?)", (user_id, address))
+    conn.commit()
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
 
 # ===== Background Worker =====
 def monitor():
     while True:
         price = get_dash_price_usd()
-        for user_id, addresses in users.items():
-            for address in addresses:
-                txs = get_latest_txs(address)
-                known = [t["txid"] for t in sent_txs.get(user_id, {}).get(address, [])]
-                last_number = max([t.get("num",0) for t in sent_txs.get(user_id, {}).get(address, [])], default=0)
-                for tx in reversed(txs):
-                    txid = tx["hash"]
-                    if txid in known:
-                        continue
-                    last_number += 1
-                    alert = format_alert(tx, address, last_number, price)
-                    try:
-                        bot.send_message(user_id, alert)
-                    except Exception as e:
-                        print(f"[{datetime.now()}] Telegram send error: {e}")
-                    sent_txs.setdefault(user_id, {}).setdefault(address, []).append({"txid": txid, "num": last_number})
-        save_json(SENT_TX_FILE, sent_txs)
-        time.sleep(10)  # 10 վայրկյան, հուսալի 24/7
+        cursor.execute("SELECT user_id, address FROM users")
+        all_users = cursor.fetchall()
+        for user_id, address in all_users:
+            txs = get_latest_txs(address)
+            cursor.execute("SELECT txid, num FROM sent_txs WHERE user_id=? AND address=?", (user_id, address))
+            known_txs = {row[0]: row[1] for row in cursor.fetchall()}
+            last_number = max(known_txs.values(), default=0)
+            for tx in reversed(txs):
+                txid = tx["hash"]
+                if txid in known_txs:
+                    continue
+                last_number += 1
+                alert = format_alert(tx, address, last_number, price)
+                try:
+                    bot.send_message(user_id, alert)
+                except Exception as e:
+                    print(f"[{datetime.now()}] Telegram send error: {e}")
+                cursor.execute("INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)",
+                               (user_id, address, txid, last_number))
+                conn.commit()
+        time.sleep(10)  # 10 վայրկյան
 
 # ===== Flask server =====
 app = Flask(__name__)
@@ -118,4 +126,3 @@ if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=5000)
-
