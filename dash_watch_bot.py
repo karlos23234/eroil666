@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 import threading
 from flask import Flask, request
 import telebot
@@ -45,7 +45,7 @@ def get_latest_txs(address):
 
 def format_alert(tx, address, tx_number, price):
     txid = tx["hash"]
-    total_received = sum([o["value"]/1e8 for o in tx.get("outputs", []) if address in (o.get("addresses") or [])])
+    total_received = sum([o.get("value",0)/1e8 for o in tx.get("outputs", []) if address in (o.get("addresses") or [])])
     usd_text = f" (${total_received*price:.2f})" if price else ""
     timestamp = tx.get("confirmed")
     timestamp = datetime.fromisoformat(timestamp.replace("Z","+00:00")).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown"
@@ -75,7 +75,7 @@ def save_address(msg):
     save_json(SENT_TX_FILE, sent_txs)
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
 
-# ===== Background loop =====
+# ===== Background Worker =====
 def monitor():
     while True:
         price = get_dash_price_usd()
@@ -93,14 +93,12 @@ def monitor():
                     try:
                         bot.send_message(user_id, alert)
                     except Exception as e:
-                        print("Telegram send error:", e)
+                        print(f"[{datetime.now()}] Telegram send error: {e}")
                     sent_txs.setdefault(user_id, {}).setdefault(address, []).append({"txid": txid, "num": last_number})
         save_json(SENT_TX_FILE, sent_txs)
-        time.sleep(5)  # 5 վայրկյանից ստուգում նոր TX-ների համար
+        time.sleep(10)  # 10 վայրկյան, հուսալի 24/7
 
-threading.Thread(target=monitor, daemon=True).start()
-
-# ===== Flask server for Render =====
+# ===== Flask server =====
 app = Flask(__name__)
 
 @app.route("/")
@@ -114,8 +112,10 @@ def webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
-bot.remove_webhook()
-bot.set_webhook(url=WEBHOOK_URL)
-
+# ===== Main =====
 if __name__ == "__main__":
+    threading.Thread(target=monitor, daemon=True).start()  # Background TX worker
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=5000)
+
