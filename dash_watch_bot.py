@@ -113,7 +113,7 @@ def monitor():
                 )
                 conn.commit()
 
-        time.sleep(10)  # 10 վայրկյան
+        time.sleep(25)  # 25 վայրկյան
 
 # ===== Flask server =====
 app = Flask(__name__)
