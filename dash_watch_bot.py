@@ -35,7 +35,7 @@ def get_address_txs(address):
         r = requests.get(url, timeout=20)
         if r.status_code == 200:
             data = r.json()
-            return data["data"][address]["transactions"]  # returns list of txids
+            return data["data"][address]["transactions"]  # list of txids
         return []
     except:
         return []
@@ -50,9 +50,25 @@ def get_tx_details(txid):
     except:
         return None
 
-def format_alert(address, amount_dash, txid, time, tx_number):
+def dash_to_usd(amount_dash):
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
+        if r.status_code == 200:
+            return amount_dash * r.json()["dash"]["usd"]
+    except:
+        return None
+    return None
+
+def format_alert(address, amount_dash, amount_usd, txid, timestamp, tx_number):
     link = f"https://blockchair.com/dash/transaction/{txid}"
-    return f"🔔 Նոր փոխանցում #{tx_number}!\n\n📌 Address: {address}\n💰 Amount: {amount_dash:.8f} DASH\n🕒 Time: {time}\n🔗 {link}"
+    usd_text = f" (${amount_usd:.2f})" if amount_usd else ""
+    return (
+        f"🔔 Նոր փոխանցում #{tx_number}!\n\n"
+        f"📌 Address: {address}\n"
+        f"💰 Amount: {amount_dash:.8f} DASH{usd_text}\n"
+        f"🕒 Time: {timestamp}\n"
+        f"🔗 {link}"
+    )
 
 # ===== Telegram Handlers =====
 @bot.message_handler(commands=['start'])
@@ -84,13 +100,14 @@ def check_loop():
                     if txid not in sent_txs.get(user_id, {}).get(address, []):
                         details = get_tx_details(txid)
                         if details:
-                            # գտնել ելքային կամ մուտքային outputs
-                            outputs = details["outputs"]
-                            total = sum(o["value"] for o in outputs if o["recipient"] == address)
+                            outputs = details.get("outputs", [])
+                            total = sum(o["value"] for o in outputs if address in o.get("recipient", ""))
                             amount_dash = total / 1e8
-                            time_str = details["transaction"]["time"]
+                            amount_usd = dash_to_usd(amount_dash)
+                            ts = details["transaction"]["time"]
+                            timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
                             tx_number = len(sent_txs[user_id][address]) + 1
-                            alert = format_alert(address, amount_dash, txid, time_str, tx_number)
+                            alert = format_alert(address, amount_dash, amount_usd, txid, timestamp, tx_number)
                             try:
                                 bot.send_message(user_id, alert)
                                 sent_txs[user_id][address].append(txid)
@@ -116,4 +133,3 @@ bot.set_webhook(url=WEBHOOK_URL)
 if __name__ == "__main__":
     port = int(5000)
     app.run(host="0.0.0.0", port=port)
-
