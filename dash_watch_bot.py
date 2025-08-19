@@ -9,7 +9,7 @@ import threading
 # ===== Telegram Bot =====
 BOT_TOKEN = os.getenv("8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14")
 if not BOT_TOKEN:
-    raise ValueError("Դուք պետք է ավելացնեք BOT_TOKEN որպես Environment Variable")
+    raise ValueError("8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 USERS_FILE = "users.json"
