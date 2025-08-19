@@ -3,8 +3,8 @@ import requests
 import json
 import os
 import time
-from datetime import datetime, timezone
 import threading
+from datetime import datetime, timezone
 from flask import Flask
 
 # ===== Telegram Bot =====
@@ -13,11 +13,17 @@ if not BOT_TOKEN:
     raise ValueError("Դուք պետք է ավելացնեք BOT_TOKEN որպես Environment Variable")
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# ===== Flask Web Server =====
+app = Flask(__name__)
 
+@app.route("/")
+def index():
+    return "Bot is running!"
+
+# ===== helpers =====
 USERS_FILE = "users.json"
 SENT_TX_FILE = "sent_txs.json"
 
-# ===== helpers =====
 def load_users():
     return json.load(open(USERS_FILE, "r", encoding="utf-8")) if os.path.exists(USERS_FILE) else {}
 
@@ -106,4 +112,9 @@ def monitor():
 
 # ===== Start threads =====
 threading.Thread(target=monitor, daemon=True).start()
-bot.infinity_polling()
+threading.Thread(target=lambda: bot.infinity_polling(), daemon=True).start()
+
+# ===== Run Flask Web Service =====
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
