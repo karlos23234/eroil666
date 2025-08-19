@@ -75,17 +75,18 @@ def save_address(msg):
     save_json(SENT_TX_FILE, sent_txs)
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
 
-# ===== Monitor loop every 5 sec =====
-def monitor_fast():
+# ===== Background loop =====
+def monitor():
     while True:
         price = get_dash_price_usd()
         for user_id, addresses in users.items():
             for address in addresses:
                 txs = get_latest_txs(address)
-                known = sent_txs.get(user_id, {}).get(address, [])
-                last_number = max([t["num"] for t in known], default=0)
+                known = [t["txid"] for t in sent_txs.get(user_id, {}).get(address, [])]
+                last_number = max([t.get("num",0) for t in sent_txs.get(user_id, {}).get(address, [])], default=0)
                 for tx in reversed(txs):
-                    if tx["hash"] in [t["txid"] for t in known]:
+                    txid = tx["hash"]
+                    if txid in known:
                         continue
                     last_number += 1
                     alert = format_alert(tx, address, last_number, price)
@@ -93,12 +94,11 @@ def monitor_fast():
                         bot.send_message(user_id, alert)
                     except Exception as e:
                         print("Telegram send error:", e)
-                    known.append({"txid": tx["hash"], "num": last_number})
-                sent_txs.setdefault(user_id, {})[address] = known
+                    sent_txs.setdefault(user_id, {}).setdefault(address, []).append({"txid": txid, "num": last_number})
         save_json(SENT_TX_FILE, sent_txs)
-        time.sleep(5)
+        time.sleep(5)  # 5 վայրկյանից ստուգում նոր TX-ների համար
 
-threading.Thread(target=monitor_fast, daemon=True).start()
+threading.Thread(target=monitor, daemon=True).start()
 
 # ===== Flask server for Render =====
 app = Flask(__name__)
