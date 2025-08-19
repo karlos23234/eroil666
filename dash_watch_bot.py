@@ -3,8 +3,8 @@ import requests
 import json
 import os
 import time
-from datetime import datetime, timezone
 import threading
+from datetime import datetime, timezone
 from flask import Flask
 
 # ===== Telegram Bot =====
@@ -16,16 +16,26 @@ bot = telebot.TeleBot(BOT_TOKEN)
 USERS_FILE = "users.json"
 SENT_TX_FILE = "sent_txs.json"
 
-# ===== helpers =====
-def load_json(file):
-    return json.load(open(file, "r", encoding="utf-8")) if os.path.exists(file) else {}
+# ===== Helpers =====
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-def save_json(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def save_users(users):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
 
-users = load_json(USERS_FILE)
-sent_txs = load_json(SENT_TX_FILE)
+def load_sent_txs():
+    if os.path.exists(SENT_TX_FILE):
+        with open(SENT_TX_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_sent_txs(sent):
+    with open(SENT_TX_FILE, "w", encoding="utf-8") as f:
+        json.dump(sent, f, ensure_ascii=False, indent=2)
 
 def get_dash_price_usd():
     try:
@@ -44,17 +54,7 @@ def get_latest_txs(address):
 def format_alert(address, amount_dash, amount_usd, txid, timestamp, tx_number):
     link = f"https://blockchair.com/dash/transaction/{txid}"
     usd_text = f" (${amount_usd:.2f})" if amount_usd else ""
-    return (
-        f"🔔 Նոր փոխանցում #{tx_number}!\n\n"
-        f"📌 Address: {address}\n"
-        f"💰 Amount: {amount_dash:.8f} DASH{usd_text}\n"
-        f"🕒 Time: {timestamp}\n"
-        f"🔗 {link}\n\n"
-        f"Blockchair ({link})\n"
-        f"Dash transaction {txid}\n"
-        f"Inspect Dash transaction {txid}: check hash, date, and event details with Blockchair."
-    )
-
+    return f"🔔 Նոր փոխանցում #{tx_number}!\n\n📌 Address: {address}\n💰 Amount: {amount_dash:.8f} DASH{usd_text}\n🕒 Time: {timestamp}\n🔗 {link}"
 
 # ===== Telegram Handlers =====
 users = load_users()
@@ -87,8 +87,7 @@ def monitor():
             for address in addresses:
                 txs = get_latest_txs(address)
                 known = sent_txs.get(user_id, {}).get(address, [])
-                known = [json.loads(t) if isinstance(t, str) else t for t in known]
-                last_number = max([t["num"] for t in known], default=0)
+                last_number = len(known)
 
                 for tx in reversed(txs):
                     txid = tx.get("hash")
@@ -105,6 +104,7 @@ def monitor():
                     except Exception as e:
                         print("Send error:", e)
                     known.append({"txid": txid,"num": last_number})
+
                 sent_txs.setdefault(user_id, {})[address]=known
                 save_sent_txs(sent_txs)
         time.sleep(30)
