@@ -5,20 +5,12 @@ import os
 import time
 import threading
 from datetime import datetime, timezone
-from flask import Flask
 
 # ===== Telegram Bot =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("Դուք պետք է ավելացնեք BOT_TOKEN որպես Environment Variable")
 bot = telebot.TeleBot(BOT_TOKEN)
-
-# ===== Flask Web Server =====
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return "Bot is running!"
 
 # ===== helpers =====
 USERS_FILE = "users.json"
@@ -110,11 +102,6 @@ def monitor():
                 save_sent_txs(sent_txs)
         time.sleep(30)
 
-# ===== Start threads =====
+# ===== Start bot and monitor =====
 threading.Thread(target=monitor, daemon=True).start()
-threading.Thread(target=lambda: bot.infinity_polling(), daemon=True).start()
-
-# ===== Run Flask Web Service =====
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+bot.infinity_polling()
