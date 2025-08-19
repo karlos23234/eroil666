@@ -1,15 +1,18 @@
-import telebot
-import requests
-import json
 import os
-import threading
+import json
 import time
+import threading
+import requests
+import telebot
 from flask import Flask, request
 from datetime import datetime
 
-# ===== Telegram Bot =====
-BOT_TOKEN = "8294188586:AAEOQdJZySFXMeWSiFMi6zhpgzezCq1YL14"
-WEBHOOK_URL = f"https://eroil666-2.onrender.com/{BOT_TOKEN}"
+# ===== Environment Variables =====
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise ValueError("Set BOT_TOKEN and WEBHOOK_URL in Render environment variables")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -31,45 +34,30 @@ sent_txs = load_json(SENT_TX_FILE)
 # ===== Blockchair functions =====
 def get_address_txs(address):
     try:
-        url = f"https://api.blockchair.com/dash/dashboards/address/{address}"
-        r = requests.get(url, timeout=20)
+        r = requests.get(f"https://api.blockchair.com/dash/dashboards/address/{address}", timeout=20)
         if r.status_code == 200:
-            data = r.json().get("data", {})
-            if address in data:
-                return data[address].get("transactions", [])
+            data = r.json()
+            return data["data"][address]["transactions"]
+    except:
         return []
-    except Exception as e:
-        print(f"Error get_address_txs: {e}")
-        return []
+    return []
 
-def get_received_amount(address, txid):
+def get_tx_details(txid):
     try:
-        url = f"https://api.blockchair.com/dash/dashboards/transaction/{txid}"
-        r = requests.get(url, timeout=20)
-        if r.status_code != 200:
-            return 0.0
-        data = r.json().get("data", {}).get(txid, {})
-        outputs = data.get("outputs", [])
-        total = 0
-        for o in outputs:
-            recipient = o.get("recipient")
-            value = o.get("value", 0)
-            if recipient == address:
-                total += value
-        return total / 1e8  # Satoshis → DASH
-    except Exception as e:
-        print(f"Error get_received_amount {txid}: {e}")
-        return 0.0
+        r = requests.get(f"https://api.blockchair.com/dash/dashboards/transaction/{txid}", timeout=20)
+        if r.status_code == 200:
+            return r.json()["data"][txid]
+    except:
+        return None
+    return None
 
 def dash_to_usd(amount_dash):
     try:
         r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
         if r.status_code == 200:
-            price = r.json().get("dash", {}).get("usd")
-            if price is not None:
-                return amount_dash * price
-    except Exception as e:
-        print(f"Error dash_to_usd: {e}")
+            return amount_dash * r.json()["dash"]["usd"]
+    except:
+        return None
     return None
 
 def format_alert(address, amount_dash, amount_usd, txid, timestamp, tx_number):
@@ -111,18 +99,22 @@ def check_loop():
                     continue
                 for txid in txids[:5]:
                     if txid not in sent_txs.get(user_id, {}).get(address, []):
-                        amount_dash = get_received_amount(address, txid)
-                        if amount_dash > 0:
+                        details = get_tx_details(txid)
+                        if details:
+                            outputs = details.get("outputs", [])
+                            total = sum(o["value"] for o in outputs if address in o.get("recipient", ""))
+                            amount_dash = total / 1e8
                             amount_usd = dash_to_usd(amount_dash)
-                            ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                            ts = details["transaction"]["time"]
+                            timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
                             tx_number = len(sent_txs[user_id][address]) + 1
-                            alert = format_alert(address, amount_dash, amount_usd, txid, ts, tx_number)
+                            alert = format_alert(address, amount_dash, amount_usd, txid, timestamp, tx_number)
                             try:
                                 bot.send_message(user_id, alert)
                                 sent_txs[user_id][address].append(txid)
                                 save_json(SENT_TX_FILE, sent_txs)
-                            except Exception as e:
-                                print(f"Error sending message: {e}")
+                            except:
+                                pass
         time.sleep(10)
 
 threading.Thread(target=check_loop, daemon=True).start()
@@ -139,7 +131,7 @@ def webhook():
 bot.remove_webhook()
 bot.set_webhook(url=WEBHOOK_URL)
 
-# ===== Run Flask =====
+# ===== Run app =====
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-gunicorn -w 4 -b 0.0.0.0:$PORT dash_watch_bot:app
+    app.run(host="0.0.0.0", port=port)
