@@ -92,13 +92,13 @@ def format_alert(tx, address, tx_count, price=None):
     )
 
 # ===== Telegram հրամաններ =====
-@bot.message_handler(commands=['start', 'help'])
+@bot.message_handler(commands=['start','help'])
 def start(message):
     bot.reply_to(message,
-        "Բարև 👋 Այս բոտը թույլ է տալիս հետևել Dash հասցեներին:\n\n"
+        "Բարև 👋\n"
         "Հրամաններ:\n"
         "/add [հասցե] - Ավելացնել հասցե\n"
-        "/list - Ցուցադրել բոլոր հասցեները\n"
+        "/list - Ցուցադրել հասցեները\n"
         "/remove [հասցե] - Հեռացնել հասցե\n"
         "/price - Տեսնել Dash-ի ընթացիկ գինը"
     )
@@ -118,13 +118,13 @@ def list_addresses(message):
         addresses = "\n".join(f"• <code>{addr}</code>" for addr in users[user_id])
         bot.reply_to(message, f"📋 Քո հասցեերը:\n{addresses}")
     else:
-        bot.reply_to(message, "❌ Չկան գրանցված հասցեներ")
+        bot.reply_to(message, "❌ Չկան հասցեներ")
 
 @bot.message_handler(commands=['remove'])
 def remove_address(message):
     user_id = str(message.chat.id)
     parts = message.text.split()
-    address = parts[1] if len(parts) > 1 else None
+    address = parts[1] if len(parts)>1 else None
     if not address:
         bot.reply_to(message, "❌ Օգտագործում: /remove X...")
         return
@@ -134,15 +134,15 @@ def remove_address(message):
         if user_id in sent_txs and address in sent_txs[user_id]:
             del sent_txs[user_id][address]
             save_json(SENT_TX_FILE, sent_txs)
-        bot.reply_to(message, f"✅ Հասցեն <code>{address}</code> ջնջված է")
+        bot.reply_to(message, f"✅ Հասցեն ջնջված է")
     else:
-        bot.reply_to(message, f"❌ Հասցեն <code>{address}</code> չի գտնվել")
+        bot.reply_to(message, "❌ Հասցեն չի գտնվել")
 
 @bot.message_handler(commands=['add'])
 def add_address(message):
     user_id = str(message.chat.id)
     parts = message.text.split()
-    if len(parts) < 2:
+    if len(parts)<2:
         bot.reply_to(message, "❌ Օգտագործում: /add X...")
         return
     address = parts[1].strip()
@@ -151,16 +151,16 @@ def add_address(message):
         return
     users.setdefault(user_id, [])
     if address in users[user_id]:
-        bot.reply_to(message, f"❌ Հասցեն {address} արդեն ավելացված է")
+        bot.reply_to(message, "❌ Հասցեն արդեն ավելացված է")
         return
-    if len(users[user_id]) >= 5:
+    if len(users[user_id])>=5:
         bot.reply_to(message, "❌ Կարող եք ավելացնել առավելագույնը 5 հասցե")
         return
     users[user_id].append(address)
     save_json(USERS_FILE, users)
-    sent_txs.setdefault(user_id, {})[address] = []
+    sent_txs.setdefault(user_id, {})[address]=[]
     save_json(SENT_TX_FILE, sent_txs)
-    bot.reply_to(message, f"✅ Հասցեն {address} հաջողությամբ ավելացվեց")
+    bot.reply_to(message, "✅ Հասցեն հաջողությամբ ավելացվեց")
 
 # ===== Monitor loop =====
 def monitor():
@@ -176,39 +176,39 @@ def monitor():
                         txid = tx.get("transaction_hash") or tx.get("hash")
                         if not txid or txid in known:
                             continue
-                        last_number += 1
-                        alert = format_alert(tx, address, last_number, price)
+                        last_number+=1
+                        alert = format_alert(tx,address,last_number,price)
                         if alert:
                             try:
                                 bot.send_message(user_id, alert, disable_web_page_preview=True)
                             except Exception as e:
                                 log_error(f"Send error: {e}")
                         sent_txs.setdefault(user_id, {}).setdefault(address, []).append(txid)
-                        sent_txs[user_id][address] = sent_txs[user_id][address][-50:]
-            save_json(SENT_TX_FILE, sent_txs)
+                        sent_txs[user_id][address]=sent_txs[user_id][address][-50:]
+            save_json(SENT_TX_FILE,sent_txs)
             time.sleep(15)
         except Exception as e:
             log_error(f"Monitor error: {e}")
             time.sleep(30)
 
 # ===== Flask սերվեր =====
-app = Flask(__name__)
+app=Flask(__name__)
 
 @app.route("/")
 def home():
     return "Dash Alert Bot is running!"
 
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+@app.route(f"/{BOT_TOKEN}",methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
+    json_str=request.get_data().decode("utf-8")
+    update=telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
-    return "OK", 200
+    return "OK",200
 
-if __name__ == "__main__":
-    threading.Thread(target=monitor, daemon=True).start()
+# ===== Գործարկում =====
+if __name__=="__main__":
+    threading.Thread(target=monitor,daemon=True).start()
     bot.remove_webhook()
     time.sleep(1)
     bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
-    app.run(host="0.0.0.0", port=5000)
-
+    app.run(host="0.0.0.0",port=5000)
