@@ -9,7 +9,7 @@ import telebot
 
 # ===== Environment variables =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("https://eroil666-3.onrender.com")
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise ValueError("Դուք պետք է ավելացնեք BOT_TOKEN և WEBHOOK_URL որպես Environment Variable")
 
