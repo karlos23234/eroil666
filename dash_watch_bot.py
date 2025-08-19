@@ -1,5 +1,4 @@
 import os
-import json
 import requests
 import time
 import sqlite3
@@ -20,6 +19,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 conn = sqlite3.connect("bot_data.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# Օգտվողների table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT,
@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
+# Ուղարկված TX table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS sent_txs (
     user_id TEXT,
@@ -88,9 +89,11 @@ def monitor():
         all_users = cursor.fetchall()
         for user_id, address in all_users:
             txs = get_latest_txs(address)
+            txs = txs[:10]  # Վերցնել միայն վերջին 10 TX
             cursor.execute("SELECT txid, num FROM sent_txs WHERE user_id=? AND address=?", (user_id, address))
             known_txs = {row[0]: row[1] for row in cursor.fetchall()}
             last_number = max(known_txs.values(), default=0)
+
             for tx in reversed(txs):
                 txid = tx["hash"]
                 if txid in known_txs:
@@ -101,9 +104,26 @@ def monitor():
                     bot.send_message(user_id, alert)
                 except Exception as e:
                     print(f"[{datetime.now()}] Telegram send error: {e}")
-                cursor.execute("INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)",
-                               (user_id, address, txid, last_number))
+                cursor.execute(
+                    "INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)",
+                    (user_id, address, txid, last_number)
+                )
                 conn.commit()
+
+            # Ուղարկել միայն վերջին 10 TX DB-ում, հիները ջնջել
+            cursor.execute(
+                "SELECT txid FROM sent_txs WHERE user_id=? AND address=? ORDER BY num DESC LIMIT 10",
+                (user_id, address)
+            )
+            last_10 = [row[0] for row in cursor.fetchall()]
+            if last_10:
+                placeholders = ','.join('?'*len(last_10))
+                cursor.execute(
+                    f"DELETE FROM sent_txs WHERE user_id=? AND address=? AND txid NOT IN ({placeholders})",
+                    [user_id, address]+last_10
+                )
+                conn.commit()
+
         time.sleep(10)  # 10 վայրկյան
 
 # ===== Flask server =====
