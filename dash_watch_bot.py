@@ -7,7 +7,6 @@ import threading
 from flask import Flask, request
 import telebot
 
-# ===== Environment variables =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 if not BOT_TOKEN or not WEBHOOK_URL:
@@ -15,7 +14,6 @@ if not BOT_TOKEN or not WEBHOOK_URL:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ===== SQLite setup =====
 conn = sqlite3.connect("bot_data.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -26,7 +24,6 @@ CREATE TABLE IF NOT EXISTS users (
     PRIMARY KEY(user_id, address)
 )
 """)
-
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS sent_txs (
     user_id TEXT,
@@ -37,23 +34,18 @@ CREATE TABLE IF NOT EXISTS sent_txs (
 """)
 conn.commit()
 
-# ===== Helpers =====
 def get_dash_price_usd():
     try:
         r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=dash&vs_currencies=usd", timeout=10)
         return float(r.json().get("dash", {}).get("usd", 0))
-    except Exception as e:
-        print("Error getting DASH price:", e)
+    except:
         return None
 
 def get_latest_txs(address):
     try:
-        r = requests.get(f"https://api.blockcypher.com/v1/dash/main/addrs/{address}/full?limit=50", timeout=20)
-        txs = r.json().get("txs", [])
-        print(f"[{datetime.now()}] Got {len(txs)} TXs for address {address}")
-        return txs
-    except Exception as e:
-        print(f"[{datetime.now()}] Error fetching TXs for {address}: {e}")
+        r = requests.get(f"https://api.blockcypher.com/v1/dash/main/addrs/{address}/full?limit=20", timeout=15)
+        return r.json().get("txs", [])
+    except:
         return []
 
 def format_alert(tx, address, tx_number, price):
@@ -62,15 +54,8 @@ def format_alert(tx, address, tx_number, price):
     usd_text = f" (${total_received*price:.2f})" if price else ""
     timestamp = tx.get("confirmed")
     timestamp = datetime.fromisoformat(timestamp.replace("Z","+00:00")).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown"
-    return (
-        f"🔔 Նոր փոխանցում #{tx_number}!\n\n"
-        f"📌 Address: {address}\n"
-        f"💰 Amount: {total_received:.8f} DASH{usd_text}\n"
-        f"🕒 Time: {timestamp}\n"
-        f"🔗 https://blockchair.com/dash/transaction/{txid}"
-    )
+    return f"🔔 Նոր փոխանցում #{tx_number}!\n📌 Address: {address}\n💰 Amount: {total_received:.8f} DASH{usd_text}\n🕒 Time: {timestamp}\n🔗 https://blockchair.com/dash/transaction/{txid}"
 
-# ===== Telegram Handlers =====
 @bot.message_handler(commands=['start'])
 def start(msg):
     bot.reply_to(msg, "Բարև 👋 Գրի՛ր քո Dash հասցեն (սկսվում է X-ով)")
@@ -82,9 +67,7 @@ def save_address(msg):
     cursor.execute("INSERT OR IGNORE INTO users (user_id, address) VALUES (?, ?)", (user_id, address))
     conn.commit()
     bot.reply_to(msg, f"✅ Հասցեն {address} պահպանվեց!")
-    print(f"[{datetime.now()}] Saved new address {address} for user {user_id}")
 
-# ===== Background Worker =====
 def monitor():
     while True:
         price = get_dash_price_usd()
@@ -95,28 +78,20 @@ def monitor():
             cursor.execute("SELECT txid, num FROM sent_txs WHERE user_id=? AND address=?", (user_id, address))
             known_txs = {row[0]: row[1] for row in cursor.fetchall()}
             last_number = max(known_txs.values(), default=0)
-
-            # Ուղարկել բոլոր նոր TX-երը առանց սահմանափակման
             for tx in reversed(txs):
                 txid = tx["hash"]
                 if txid in known_txs:
                     continue
                 last_number += 1
                 alert = format_alert(tx, address, last_number, price)
-                print(f"[{datetime.now()}] Sending TX alert for {address}: {txid}")
                 try:
                     bot.send_message(user_id, alert)
-                except Exception as e:
-                    print(f"[{datetime.now()}] Telegram send error: {e}")
-                cursor.execute(
-                    "INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)",
-                    (user_id, address, txid, last_number)
-                )
+                except:
+                    pass
+                cursor.execute("INSERT OR IGNORE INTO sent_txs (user_id, address, txid, num) VALUES (?, ?, ?, ?)", (user_id, address, txid, last_number))
                 conn.commit()
+        time.sleep(3)  # 3 վայրկյան ինտերվալ, շատ թեթև
 
-        time.sleep(3)  # 3 վայրկյան՝ շուտ ստուգելու համար
-
-# ===== Flask server =====
 app = Flask(__name__)
 
 @app.route("/")
@@ -130,10 +105,9 @@ def webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
-# ===== Main =====
 if __name__ == "__main__":
-    threading.Thread(target=monitor, daemon=True).start()  # Background TX worker
+    threading.Thread(target=monitor, daemon=True).start()
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
-    print(f"[{datetime.now()}] Bot started. Webhook set to {WEBHOOK_URL}")
     app.run(host="0.0.0.0", port=5000)
+
